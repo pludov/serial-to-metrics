@@ -1,0 +1,13 @@
+[Unit]
+Description=Serial to Metrics
+After=docker.service
+
+[Service]
+User=nobody
+Group=dialout
+ExecStart=/usr/bin/serial-to-metrics --port /dev/ttyS4
+Restart=on-failure
+UMask=0002
+
+[Install]
+WantedBy=multi-user.target
