@@ -38,6 +38,20 @@ pub struct Args {
     )]
     pub timeout: u64,
 
+    #[arg(
+        long = "data-min-interval",
+        default_value = "250",
+        help = "Minimum idle interval expected between data - in ms"
+    )]
+    pub data_min_interval: u64,
+
+    #[arg(
+        long,
+        default_value = "false",
+        help = "Activate dump of raw data to stdout"
+    )]
+    pub verbose: bool,
+
     #[arg(long = "label")]
     pub labels: Vec<String>,
 }

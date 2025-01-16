@@ -34,6 +34,7 @@ struct Metric {
 }
 
 struct SerialReceiver {
+    verbose: bool,
     channel: std::sync::mpsc::Sender<Metric>,
 }
 
@@ -73,12 +74,12 @@ impl SerialReceiver {
     }
 
     fn handle_line(&self, line: &[u8]) {
+        if self.verbose {
+            println!("Received: {:?}", line);
+        }
         let parsed = self.parse_line(line);
         if parsed.is_err() {
-            println!(
-                "Could not parse line: {} !!!!!!!!!!!!!!!!!",
-                parsed.err().unwrap()
-            );
+            println!("Could not parse line: {}", parsed.err().unwrap());
             return;
         }
         let (measurement, value) = parsed.unwrap();
@@ -121,7 +122,7 @@ impl SerialReceiver {
         // open the serial device
         loop {
             let port_open = serialport::new(&args.port, args.rate)
-                .timeout(Duration::from_millis(500))
+                .timeout(Duration::from_millis(args.data_min_interval))
                 .open_native();
 
             let mut port = match port_open {
@@ -285,7 +286,10 @@ impl SerialSender {
 fn main() {
     let args = Args::parse();
     let (sender, receiver) = std::sync::mpsc::channel::<Metric>();
-    let serial_receiver = SerialReceiver { channel: sender };
+    let serial_receiver = SerialReceiver {
+        verbose: args.verbose,
+        channel: sender,
+    };
     let serial_sender = SerialSender::new(&args, receiver);
     std::thread::spawn(move || {
         serial_sender.send();
