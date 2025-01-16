@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
@@ -19,8 +17,8 @@ pub struct Args {
     #[arg(
         short,
         long,
-        default_value = "http://localhost:3000",
-        help = "Target for http server"
+        default_value = "http://localhost:8428/api/v1/import/prometheus",
+        help = "Target URL for metric server"
     )]
     pub url: String,
 
@@ -39,4 +37,7 @@ pub struct Args {
         help = "Timeout for http requests in ms"
     )]
     pub timeout: u64,
+
+    #[arg(long = "label")]
+    pub labels: Vec<String>,
 }

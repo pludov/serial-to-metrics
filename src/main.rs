@@ -6,7 +6,7 @@ use std::{
 
 use clap::Parser;
 use cli::Args;
-
+use ureq::Error;
 mod cli;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -16,10 +16,20 @@ enum Measurement {
     U,
 }
 
+impl Measurement {
+    fn metric_name(&self) -> &'static str {
+        match self {
+            Measurement::P => "supply_consumed_power",
+            Measurement::I => "supply_current",
+            Measurement::U => "supply_voltage",
+        }
+    }
+}
+
 #[derive(PartialEq, Clone, Debug)]
 struct Metric {
     measurement: Measurement,
-    timestamp: u64,
+    timestamp: f64,
     value: f64,
 }
 
@@ -79,7 +89,7 @@ impl SerialReceiver {
                 timestamp: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("Epoch overflow ?")
-                    .as_secs(),
+                    .as_secs_f64(),
                 value,
             })
             .expect("Failed to send metric");
@@ -161,10 +171,73 @@ impl SerialReceiver {
 }
 
 struct SerialSender {
+    url: String,
+    labels: String,
     channel: std::sync::mpsc::Receiver<Metric>,
+    agent: ureq::Agent,
 }
 
 impl SerialSender {
+    fn new(args: &Args, channel: std::sync::mpsc::Receiver<Metric>) -> Self {
+        let mut labels;
+        if args.labels.is_empty() {
+            labels = "".to_string();
+        } else {
+            labels = "{".to_string();
+            for label in &args.labels {
+                // Split label arround the = sign
+                let key_value = label.split_once('=');
+                if key_value.is_none() {
+                    panic!("Invalid label format: {}", label);
+                }
+                let key_value = key_value.unwrap();
+                if labels.len() > 1 {
+                    labels.push_str(",");
+                }
+                labels.push_str(format!("{}=\"{}\"", key_value.0, key_value.1).as_str());
+            }
+            labels.push_str("}");
+        }
+        let agent = ureq::AgentBuilder::new()
+            .timeout_read(Duration::from_secs(5))
+            .timeout_write(Duration::from_secs(5))
+            .timeout_connect(Duration::from_secs(5))
+            .build();
+
+        Self {
+            labels,
+            channel,
+            agent,
+            url: args.url.clone(),
+        }
+    }
+
+    // Perform a HTTP POST request to the server
+    fn send_payload(&self, payload: &str) {
+        let res = self
+            .agent
+            .post(&self.url)
+            .set(
+                "Content-Type",
+                "application/openmetrics-text; version=1.0.0; charset=utf-8",
+            )
+            .send_string(&payload);
+
+        match res {
+            Ok(res) => {
+                if res.status() < 200 || res.status() >= 300 {
+                    println!("Failed to send metrics: {:?}", res.status());
+                }
+            }
+            Err(Error::Status(status, _)) => {
+                println!("Failed to send metrics: {:?}", status);
+            }
+            Err(Error::Transport(err)) => {
+                println!("Failed to send metrics: {:?}", err.kind());
+            }
+        }
+    }
+
     fn send(&self) {
         let mut latest = HashMap::new();
         let mut last_sent = Instant::now();
@@ -173,7 +246,10 @@ impl SerialSender {
             let metric = self.channel.recv_timeout(Duration::from_millis(1000));
             match metric {
                 Ok(metric) => {
-                    latest.insert(metric.measurement.clone(), metric);
+                    let dic = latest
+                        .entry(metric.measurement.clone())
+                        .or_insert_with(Vec::new);
+                    dic.push(metric);
                 }
                 Err(_) => {}
             }
@@ -181,12 +257,25 @@ impl SerialSender {
             let now = Instant::now();
 
             if now.duration_since(last_sent) > interval {
-                println!("Sending metrics {:?}", latest);
-                for (measurement, metric) in &latest {
-                    println!("{:?}: {:?}", measurement, metric.value);
+                let mut payload: String = String::new();
+                let labels = &self.labels;
+                for (measurement, metrics) in &latest {
+                    for metric in metrics {
+                        let metric_name = measurement.metric_name();
+                        let metric_value = metric.value;
+                        let metric_timestamp = metric.timestamp;
+                        payload.push_str(
+                            format!(
+                                "{metric_name}{labels} {metric_value:.8} {metric_timestamp:.3}\n"
+                            )
+                            .as_str(),
+                        );
+                    }
                 }
                 last_sent = now;
                 latest.clear();
+
+                self.send_payload(&payload);
                 interval = Duration::from_secs(5);
             }
         }
@@ -197,7 +286,7 @@ fn main() {
     let args = Args::parse();
     let (sender, receiver) = std::sync::mpsc::channel::<Metric>();
     let serial_receiver = SerialReceiver { channel: sender };
-    let serial_sender = SerialSender { channel: receiver };
+    let serial_sender = SerialSender::new(&args, receiver);
     std::thread::spawn(move || {
         serial_sender.send();
     });

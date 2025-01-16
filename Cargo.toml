@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }
 serialport = "4.7.0"
+ureq = "2.12.1"
