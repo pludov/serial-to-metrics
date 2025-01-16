@@ -39,7 +39,13 @@ struct SerialReceiver {
 }
 
 impl SerialReceiver {
-    fn parse_line(&self, line: &[u8]) -> Result<(Measurement, f64), &str> {
+    fn parse_line(&self, line: &[u8]) -> Result<Option<(Measurement, f64)>, &str> {
+        if line.len() == 0 {
+            return Ok(None);
+        }
+        if line.len() == 1 && line[0] == b'\r' {
+            return Ok(None);
+        }
         for i in 0..line.len() {
             if line[i] > 127 {
                 return Err("Non ascii char");
@@ -69,7 +75,7 @@ impl SerialReceiver {
 
         let value: f64 = line_str.parse().map_err(|_e| "Not a number")?;
 
-        Ok((measurement, value))
+        Ok(Some((measurement, value)))
         //
     }
 
@@ -80,6 +86,10 @@ impl SerialReceiver {
         let parsed = self.parse_line(line);
         if parsed.is_err() {
             println!("Could not parse line: {}", parsed.err().unwrap());
+            return;
+        }
+        let parsed = parsed.unwrap();
+        if parsed.is_none() {
             return;
         }
         let (measurement, value) = parsed.unwrap();
@@ -111,6 +121,7 @@ impl SerialReceiver {
 
                 *line_pos -= i + 1;
                 i = 0;
+                //println!("Buffer left is {:?}", &line_buf[0..*line_pos]);
             } else {
                 i += 1;
             }
@@ -118,7 +129,8 @@ impl SerialReceiver {
     }
 
     fn monitor(&self, args: &Args) {
-        let mut timed_out = false;
+        let mut data_frame_start: Option<Instant> = None;
+
         // open the serial device
         loop {
             let port_open = serialport::new(&args.port, args.rate)
@@ -140,20 +152,29 @@ impl SerialReceiver {
             loop {
                 match port.read(&mut line_buf[line_pos..256]) {
                     Ok(bytes) => {
-                        if timed_out {
-                            timed_out = false;
-                            self.consume_lines(&mut line_buf, &mut line_pos, bytes);
-                            if line_pos == 256 {
-                                println!("Buffer full, giving up...");
-                                break;
-                            }
-                        } else {
-                            println!("Discarding data");
+                        if data_frame_start.is_none() {
+                            data_frame_start = Some(Instant::now());
+                        } else if data_frame_start.unwrap().elapsed()
+                            > Duration::from_millis(args.data_min_interval)
+                        {
+                            println!(
+                                "Data overflow: data reception lasted more than {} ms",
+                                args.data_min_interval
+                            );
+                            break;
+                        }
+                        self.consume_lines(&mut line_buf, &mut line_pos, bytes);
+                        if line_pos == 256 {
+                            println!("Buffer full, giving up...");
+                            break;
                         }
                     }
                     Err(err) => match err.kind() {
                         ErrorKind::TimedOut => {
-                            timed_out = true;
+                            if line_pos > 0 {
+                                println!("Discarding data");
+                            }
+                            data_frame_start = None;
                             line_pos = 0;
                             line_buf = [0u8; 256];
                             continue;
