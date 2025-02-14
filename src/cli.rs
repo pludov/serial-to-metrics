@@ -7,7 +7,8 @@ pub struct Args {
         short,
         long,
         default_value = "/dev/ttyACM0",
-        help = "Path to serial port"
+        help = "Path to serial port",
+        env = "SERIAL_PORT"
     )]
     pub port: String,
 
@@ -18,6 +19,7 @@ pub struct Args {
         short,
         long,
         default_value = "http://localhost:8428/api/v1/import/prometheus",
+        env = "METRIC_SERVER",
         help = "Target URL for metric server"
     )]
     pub url: String,

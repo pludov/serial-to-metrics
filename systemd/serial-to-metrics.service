@@ -3,9 +3,10 @@ Description=Serial to Metrics
 After=docker.service
 
 [Service]
+Environment="SERIAL_PORT=/dev/ttyS4"
 User=nobody
 Group=dialout
-ExecStart=/usr/bin/serial-to-metrics --port /dev/ttyS4
+ExecStart=/usr/bin/serial-to-metrics
 Restart=on-failure
 UMask=0002
 
